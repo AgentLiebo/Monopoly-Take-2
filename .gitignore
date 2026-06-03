@@ -1,0 +1,27 @@
+# .NET build artifacts
+bin/
+obj/
+
+# Unity generated folders
+Library/
+Temp/
+Obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+MemoryCaptures/
+
+# IDE/editor
+.vs/
+.vscode/
+.idea/
+*.csproj.user
+*.suo
+*.user
+*.pidb
+*.booproj
+*.svd
+
+# Publish artifacts
+publish/
