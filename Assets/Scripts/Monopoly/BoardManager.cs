@@ -13,13 +13,9 @@ public sealed class BoardManager
         _rng = rng ?? new Random();
         Spaces = BuildStandardBoard();
         SpaceByIndex = Spaces.ToDictionary(s => s.Index);
-        PurchasableSpaces = Spaces.Where(s => s.IsPurchasable).ToArray();
-        SpacesByGroup = PurchasableSpaces.GroupBy(s => s.ColorGroup).ToDictionary(g => g.Key, g => (IReadOnlyList<BoardSpaceData>)g.ToArray());
     }
 
     public IReadOnlyList<BoardSpaceData> Spaces { get; }
-    public IReadOnlyList<BoardSpaceData> PurchasableSpaces { get; }
-    public IReadOnlyDictionary<ColorGroup, IReadOnlyList<BoardSpaceData>> SpacesByGroup { get; }
     public IReadOnlyDictionary<int, BoardSpaceData> SpaceByIndex { get; }
 
     public BoardSpaceData GetSpace(int index) => SpaceByIndex[Normalize(index)];
@@ -34,38 +30,15 @@ public sealed class BoardManager
 
     public int Move(int start, int spaces) => Normalize(start + spaces);
 
-    public IReadOnlyList<BoardSpaceData> GetSpacesInGroup(ColorGroup group)
-    {
-        return SpacesByGroup.TryGetValue(group, out var spaces) ? spaces : Array.Empty<BoardSpaceData>();
-    }
-
     public int FindNearest(int currentIndex, SpaceType type)
     {
-        var closestDistance = MonopolyRules.BoardSpaceCount + 1;
-        var closestIndex = -1;
-        for (var i = 0; i < Spaces.Count; i++)
+        for (var offset = 1; offset <= MonopolyRules.BoardSpaceCount; offset++)
         {
-            if (Spaces[i].Type != type)
+            var candidate = GetSpace(currentIndex + offset);
+            if (candidate.Type == type)
             {
-                continue;
+                return candidate.Index;
             }
-
-            var distance = Normalize(Spaces[i].Index - currentIndex);
-            if (distance == 0)
-            {
-                distance = MonopolyRules.BoardSpaceCount;
-            }
-
-            if (distance < closestDistance)
-            {
-                closestDistance = distance;
-                closestIndex = Spaces[i].Index;
-            }
-        }
-
-        if (closestIndex >= 0)
-        {
-            return closestIndex;
         }
 
         throw new InvalidOperationException($"No board space of type {type} exists.");
