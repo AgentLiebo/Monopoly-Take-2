@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MonopolyTake2;
 
@@ -14,13 +15,9 @@ public sealed class PropertyManager
 
     public Dictionary<int, PropertyState> CreateInitialPropertyStates()
     {
-        var properties = new Dictionary<int, PropertyState>(_board.PurchasableSpaces.Count);
-        foreach (var space in _board.PurchasableSpaces)
-        {
-            properties[space.Index] = new PropertyState { BoardIndex = space.Index };
-        }
-
-        return properties;
+        return _board.Spaces
+            .Where(s => s.IsPurchasable)
+            .ToDictionary(s => s.Index, s => new PropertyState { BoardIndex = s.Index });
     }
 
     public bool IsOwned(MonopolyGameState state, int propertyIndex) => state.Properties[propertyIndex].OwnerId.HasValue;
@@ -28,24 +25,12 @@ public sealed class PropertyManager
     public bool OwnsFullSet(MonopolyGameState state, Guid playerId, ColorGroup group)
     {
         if (group is ColorGroup.None) return false;
-        var spaces = _board.GetSpacesInGroup(group);
-        if (spaces.Count == 0)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < spaces.Count; i++)
-        {
-            if (state.Properties[spaces[i].Index].OwnerId != playerId)
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return _board.Spaces
+            .Where(s => s.ColorGroup == group && s.IsPurchasable)
+            .All(s => state.Properties[s.Index].OwnerId == playerId);
     }
 
-    public IReadOnlyList<BoardSpaceData> GetColorSet(ColorGroup group) => _board.GetSpacesInGroup(group);
+    public IEnumerable<BoardSpaceData> GetColorSet(ColorGroup group) => _board.Spaces.Where(s => s.ColorGroup == group && s.IsPurchasable);
 
     public int CalculateRent(MonopolyGameState state, int propertyIndex, DiceRoll? utilityRoll = null, bool forceDouble = false)
     {
@@ -113,23 +98,14 @@ public sealed class PropertyManager
             reason = "Property already has a hotel.";
             return false;
         }
-        var player = state.GetPlayer(playerId);
-        var improvementCost = property.Houses == MonopolyRules.MaxHouses ? space.HotelCost : space.HouseCost;
-        if (player.Money < improvementCost)
+        if (state.Players.Single(p => p.Id == playerId).Money < space.HouseCost)
         {
             reason = "Insufficient money.";
             return false;
         }
 
-        var minHouseCount = MonopolyRules.HotelHouseEquivalent;
-        var colorSet = GetColorSet(space.ColorGroup);
-        for (var i = 0; i < colorSet.Count; i++)
-        {
-            var setProperty = state.Properties[colorSet[i].Index];
-            var setHouseCount = setProperty.HasHotel ? MonopolyRules.HotelHouseEquivalent : setProperty.Houses;
-            minHouseCount = Math.Min(minHouseCount, setHouseCount);
-        }
-
+        var set = GetColorSet(space.ColorGroup).Select(s => state.Properties[s.Index]).ToList();
+        var minHouseCount = set.Min(p => p.HasHotel ? MonopolyRules.HotelHouseEquivalent : p.Houses);
         var current = property.HasHotel ? MonopolyRules.HotelHouseEquivalent : property.Houses;
         if (current > minHouseCount)
         {
@@ -150,7 +126,7 @@ public sealed class PropertyManager
 
         var space = _board.GetSpace(propertyIndex);
         var property = state.Properties[propertyIndex];
-        var player = state.GetPlayer(playerId);
+        var player = state.Players.Single(p => p.Id == playerId);
         player.Money -= property.Houses == MonopolyRules.MaxHouses ? space.HotelCost : space.HouseCost;
         if (property.Houses == MonopolyRules.MaxHouses)
         {
@@ -172,7 +148,7 @@ public sealed class PropertyManager
             return false;
         }
 
-        var player = state.GetPlayer(playerId);
+        var player = state.Players.Single(p => p.Id == playerId);
         if (property.HasHotel)
         {
             property.HasHotel = false;
@@ -198,7 +174,7 @@ public sealed class PropertyManager
         }
 
         property.IsMortgaged = true;
-        state.GetPlayer(playerId).Money += space.MortgageValue;
+        state.Players.Single(p => p.Id == playerId).Money += space.MortgageValue;
         return true;
     }
 
@@ -206,7 +182,7 @@ public sealed class PropertyManager
     {
         var property = state.Properties[propertyIndex];
         var space = _board.GetSpace(propertyIndex);
-        var player = state.GetPlayer(playerId);
+        var player = state.Players.Single(p => p.Id == playerId);
         var cost = MonopolyRules.MortgageRepayment(space.MortgageValue);
         if (property.OwnerId != playerId || !property.IsMortgaged || player.Money < cost)
         {
@@ -223,13 +199,13 @@ public sealed class PropertyManager
         var property = state.Properties[propertyIndex];
         if (property.OwnerId.HasValue)
         {
-            state.GetPlayer(property.OwnerId.Value).OwnedPropertyIndexes.Remove(propertyIndex);
+            state.Players.Single(p => p.Id == property.OwnerId.Value).OwnedPropertyIndexes.Remove(propertyIndex);
         }
 
         property.OwnerId = newOwnerId;
         if (newOwnerId.HasValue)
         {
-            var owner = state.GetPlayer(newOwnerId.Value);
+            var owner = state.Players.Single(p => p.Id == newOwnerId.Value);
             if (!owner.OwnedPropertyIndexes.Contains(propertyIndex))
             {
                 owner.OwnedPropertyIndexes.Add(propertyIndex);
@@ -239,16 +215,6 @@ public sealed class PropertyManager
 
     public int CountOwnedInGroup(MonopolyGameState state, Guid ownerId, ColorGroup group)
     {
-        var count = 0;
-        var spaces = _board.GetSpacesInGroup(group);
-        for (var i = 0; i < spaces.Count; i++)
-        {
-            if (state.Properties[spaces[i].Index].OwnerId == ownerId)
-            {
-                count++;
-            }
-        }
-
-        return count;
+        return _board.Spaces.Count(s => s.ColorGroup == group && s.IsPurchasable && state.Properties[s.Index].OwnerId == ownerId);
     }
 }

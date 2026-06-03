@@ -22,6 +22,3 @@ MemoryCaptures/
 *.pidb
 *.booproj
 *.svd
-
-# Publish artifacts
-publish/

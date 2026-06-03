@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MonopolyTake2;
 
@@ -37,7 +38,6 @@ public sealed record GameUiModel(
 
 public sealed class UiModelFactory
 {
-    private const int TurnLogLimit = 25;
     private readonly BoardManager _board;
 
     public UiModelFactory(BoardManager board)
@@ -49,11 +49,11 @@ public sealed class UiModelFactory
     {
         return new GameUiModel(
             state.Phase,
-            CreatePlayerHudModels(state),
+            state.Players.Select((p, i) => new PlayerHudModel(p.Id, p.Name, p.Token, p.Money, p.Position, i == state.CurrentPlayerIndex, p.InJail, p.Bankrupt, p.GetOutOfJailFreeCards)).ToList(),
             selectedPropertyIndex.HasValue ? CreatePropertyPanel(state, selectedPropertyIndex.Value) : null,
             state.CurrentAuction,
             state.CurrentTradeProposal,
-            CreateTurnLog(state),
+            state.TurnHistory.TakeLast(25).Select(h => h.Message).ToList(),
             state.WinnerId);
     }
 
@@ -62,7 +62,7 @@ public sealed class UiModelFactory
         var space = _board.GetSpace(propertyIndex);
         state.Properties.TryGetValue(propertyIndex, out var property);
         var ownerName = property?.OwnerId.HasValue == true
-            ? state.GetPlayer(property.OwnerId.Value).Name
+            ? state.Players.Single(p => p.Id == property.OwnerId.Value).Name
             : "Unowned";
         return new PropertyPanelModel(
             space.Name,
@@ -75,38 +75,5 @@ public sealed class UiModelFactory
             property?.IsMortgaged ?? false,
             property?.Houses ?? 0,
             property?.HasHotel ?? false);
-    }
-
-    private static IReadOnlyList<PlayerHudModel> CreatePlayerHudModels(MonopolyGameState state)
-    {
-        var models = new List<PlayerHudModel>(state.Players.Count);
-        for (var i = 0; i < state.Players.Count; i++)
-        {
-            var player = state.Players[i];
-            models.Add(new PlayerHudModel(
-                player.Id,
-                player.Name,
-                player.Token,
-                player.Money,
-                player.Position,
-                i == state.CurrentPlayerIndex,
-                player.InJail,
-                player.Bankrupt,
-                player.GetOutOfJailFreeCards));
-        }
-
-        return models;
-    }
-
-    private static IReadOnlyList<string> CreateTurnLog(MonopolyGameState state)
-    {
-        var start = Math.Max(0, state.TurnHistory.Count - TurnLogLimit);
-        var entries = new List<string>(state.TurnHistory.Count - start);
-        for (var i = start; i < state.TurnHistory.Count; i++)
-        {
-            entries.Add(state.TurnHistory[i].Message);
-        }
-
-        return entries;
     }
 }

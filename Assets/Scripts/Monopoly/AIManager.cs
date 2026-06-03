@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Generic;
+using System.Linq;
 
 namespace MonopolyTake2;
 
@@ -47,28 +47,29 @@ public sealed class AIManager
             return;
         }
 
-        var evaluatedGroups = new HashSet<ColorGroup>();
-        for (var i = 0; i < ai.OwnedPropertyIndexes.Count; i++)
+        foreach (var group in ai.OwnedPropertyIndexes.Select(i => _board.GetSpace(i).ColorGroup).Distinct())
         {
-            var group = _board.GetSpace(ai.OwnedPropertyIndexes[i]).ColorGroup;
-            if (group is ColorGroup.None or ColorGroup.Railroad or ColorGroup.Utility || !evaluatedGroups.Add(group))
-            {
-                continue;
-            }
+            if (group is ColorGroup.None or ColorGroup.Railroad or ColorGroup.Utility) continue;
+            if (!_properties.OwnsFullSet(state, ai.Id, group)) continue;
 
-            TryBuildInGroup(state, ai, group);
+            var buildTarget = _properties.GetColorSet(group)
+                .Select(s => state.Properties[s.Index])
+                .OrderBy(p => p.HasHotel ? MonopolyRules.HotelHouseEquivalent : p.Houses)
+                .FirstOrDefault();
+            if (buildTarget == null) continue;
+            var space = _board.GetSpace(buildTarget.BoardIndex);
+            if (ai.Money - space.HouseCost >= 300 && _properties.CanBuildHouse(state, ai.Id, buildTarget.BoardIndex, out _))
+            {
+                _properties.BuildHouseOrHotel(state, ai.Id, buildTarget.BoardIndex);
+            }
         }
 
         if (ai.Money < 100)
         {
-            var ownedSnapshot = new List<int>(ai.OwnedPropertyIndexes);
-            for (var i = 0; i < ownedSnapshot.Count && ai.Money < 100; i++)
+            foreach (var index in ai.OwnedPropertyIndexes.Where(i => !state.Properties[i].IsMortgaged && !state.Properties[i].IsImproved).ToList())
             {
-                var property = state.Properties[ownedSnapshot[i]];
-                if (!property.IsMortgaged && !property.IsImproved)
-                {
-                    _properties.Mortgage(state, ai.Id, ownedSnapshot[i]);
-                }
+                if (ai.Money >= 100) break;
+                _properties.Mortgage(state, ai.Id, index);
             }
         }
     }
@@ -77,19 +78,14 @@ public sealed class AIManager
     {
         if (!ai.IsAi || ai.Money < 200) return null;
 
-        foreach (var missing in state.Properties.Values)
+        foreach (var missing in state.Properties.Values.Where(p => p.OwnerId.HasValue && p.OwnerId != ai.Id && !p.IsImproved))
         {
-            if (!missing.OwnerId.HasValue || missing.OwnerId == ai.Id || missing.IsImproved)
-            {
-                continue;
-            }
-
             var space = _board.GetSpace(missing.BoardIndex);
             if (space.ColorGroup is ColorGroup.None or ColorGroup.Railroad or ColorGroup.Utility) continue;
             var ownsSome = _properties.CountOwnedInGroup(state, ai.Id, space.ColorGroup) > 0;
             if (!ownsSome) continue;
 
-            var owner = state.GetPlayer(missing.OwnerId.Value);
+            var owner = state.Players.Single(p => p.Id == missing.OwnerId!.Value);
             var cashOffer = Math.Min(ai.Money - 100, space.Price + 50);
             return new TradeProposal
             {
@@ -101,38 +97,5 @@ public sealed class AIManager
         }
 
         return null;
-    }
-
-    private void TryBuildInGroup(MonopolyGameState state, PlayerState ai, ColorGroup group)
-    {
-        if (!_properties.OwnsFullSet(state, ai.Id, group))
-        {
-            return;
-        }
-
-        PropertyState? buildTarget = null;
-        var buildTargetRank = MonopolyRules.HotelHouseEquivalent + 1;
-        var colorSet = _properties.GetColorSet(group);
-        for (var i = 0; i < colorSet.Count; i++)
-        {
-            var property = state.Properties[colorSet[i].Index];
-            var rank = property.HasHotel ? MonopolyRules.HotelHouseEquivalent : property.Houses;
-            if (rank < buildTargetRank)
-            {
-                buildTarget = property;
-                buildTargetRank = rank;
-            }
-        }
-
-        if (buildTarget == null)
-        {
-            return;
-        }
-
-        var space = _board.GetSpace(buildTarget.BoardIndex);
-        if (ai.Money - space.HouseCost >= 300 && _properties.CanBuildHouse(state, ai.Id, buildTarget.BoardIndex, out _))
-        {
-            _properties.BuildHouseOrHotel(state, ai.Id, buildTarget.BoardIndex);
-        }
     }
 }
