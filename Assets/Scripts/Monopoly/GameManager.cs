@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MonopolyTake2;
 
@@ -40,7 +41,7 @@ public sealed class GameManager
             Phase = TurnPhase.AwaitingRoll
         };
         DetermineTurnOrder();
-        Log("New game started. Turn order: " + BuildTurnOrderSummary() + ".");
+        Log("New game started. Turn order: " + string.Join(", ", State.Players.Select(p => p.Name)) + ".");
         return State;
     }
 
@@ -122,19 +123,10 @@ public sealed class GameManager
     {
         var propertyIndex = State.PendingPurchasePropertyIndex ?? throw new InvalidOperationException("No property is pending purchase.");
         State.PendingPurchasePropertyIndex = null;
-        var activeBidderIds = new HashSet<Guid>();
-        for (var i = 0; i < State.Players.Count; i++)
-        {
-            if (!State.Players[i].Bankrupt)
-            {
-                activeBidderIds.Add(State.Players[i].Id);
-            }
-        }
-
         State.CurrentAuction = new AuctionState
         {
             PropertyIndex = propertyIndex,
-            ActiveBidderIds = activeBidderIds
+            ActiveBidderIds = State.Players.Where(p => !p.Bankrupt).Select(p => p.Id).ToHashSet()
         };
         State.Phase = TurnPhase.Auction;
         Log($"Auction started for {Board.GetSpace(propertyIndex).Name}.");
@@ -144,7 +136,7 @@ public sealed class GameManager
     public void PlaceAuctionBid(Guid bidderId, int amount)
     {
         var auction = State.CurrentAuction ?? throw new InvalidOperationException("No auction is active.");
-        var bidder = State.GetPlayer(bidderId);
+        var bidder = State.Players.Single(p => p.Id == bidderId);
         if (!auction.ActiveBidderIds.Contains(bidderId) || bidder.Money < amount || amount <= auction.HighestBid)
         {
             throw new InvalidOperationException("Invalid auction bid.");
@@ -171,7 +163,7 @@ public sealed class GameManager
         auction.IsClosed = true;
         if (auction.HighestBidderId.HasValue)
         {
-            var winner = State.GetPlayer(auction.HighestBidderId.Value);
+            var winner = State.Players.Single(p => p.Id == auction.HighestBidderId.Value);
             winner.Money -= auction.HighestBid;
             Properties.TransferProperty(State, auction.PropertyIndex, winner.Id);
             Log($"{winner.Name} won {Board.GetSpace(auction.PropertyIndex).Name} for ${auction.HighestBid}.", winner.Id);
@@ -190,19 +182,11 @@ public sealed class GameManager
 
     private void DetermineTurnOrder()
     {
-        var turnOrder = new List<(PlayerState Player, int Roll)>(State.Players.Count);
-        for (var i = 0; i < State.Players.Count; i++)
-        {
-            turnOrder.Add((State.Players[i], _rng.Next(1, 7) + _rng.Next(1, 7)));
-        }
-
-        turnOrder.Sort((left, right) => right.Roll.CompareTo(left.Roll));
-        State.Players = new List<PlayerState>(turnOrder.Count);
-        for (var i = 0; i < turnOrder.Count; i++)
-        {
-            State.Players.Add(turnOrder[i].Player);
-        }
-
+        State.Players = State.Players
+            .Select(p => (Player: p, Roll: _rng.Next(1, 7) + _rng.Next(1, 7)))
+            .OrderByDescending(x => x.Roll)
+            .Select(x => x.Player)
+            .ToList();
         State.CurrentPlayerIndex = 0;
     }
 
@@ -316,7 +300,7 @@ public sealed class GameManager
             return;
         }
 
-        var owner = State.GetPlayer(property.OwnerId.Value);
+        var owner = State.Players.Single(p => p.Id == property.OwnerId.Value);
         var rent = Properties.CalculateRent(State, space.Index, roll, forceDoubleRent);
         Players.PayPlayer(State, player, owner, rent);
         Log($"{player.Name} paid ${rent} rent to {owner.Name} for {space.Name}.", player.Id);
@@ -366,34 +350,14 @@ public sealed class GameManager
                 player.GetOutOfJailFreeCards++;
                 break;
             case CardActionType.Repairs:
-                var owed = 0;
-                for (var i = 0; i < player.OwnedPropertyIndexes.Count; i++)
-                {
-                    var ownedProperty = State.Properties[player.OwnedPropertyIndexes[i]];
-                    owed += ownedProperty.Houses * card.Amount + (ownedProperty.HasHotel ? card.TargetSpace : 0);
-                }
-
+                var owed = player.OwnedPropertyIndexes.Sum(i => State.Properties[i].Houses * card.Amount + (State.Properties[i].HasHotel ? card.TargetSpace : 0));
                 Players.PayBank(State, player, owed);
                 break;
             case CardActionType.PayEachPlayer:
-                for (var i = 0; i < State.Players.Count; i++)
-                {
-                    var other = State.Players[i];
-                    if (other.Id != player.Id && !other.Bankrupt)
-                    {
-                        Players.PayPlayer(State, player, other, card.Amount);
-                    }
-                }
+                foreach (var other in State.Players.Where(p => p.Id != player.Id && !p.Bankrupt)) Players.PayPlayer(State, player, other, card.Amount);
                 break;
             case CardActionType.CollectFromEachPlayer:
-                for (var i = 0; i < State.Players.Count; i++)
-                {
-                    var other = State.Players[i];
-                    if (other.Id != player.Id && !other.Bankrupt)
-                    {
-                        Players.PayPlayer(State, other, player, card.Amount);
-                    }
-                }
+                foreach (var other in State.Players.Where(p => p.Id != player.Id && !p.Bankrupt)) Players.PayPlayer(State, other, player, card.Amount);
                 break;
             default:
                 throw new ArgumentOutOfRangeException();
@@ -428,13 +392,9 @@ public sealed class GameManager
         if (State.Phase == TurnPhase.GameOver) return;
 
         State.Phase = TurnPhase.ManagingAssets;
-        for (var i = 0; i < State.Players.Count; i++)
+        foreach (var ai in State.Players.Where(p => p.IsAi && !p.Bankrupt))
         {
-            var ai = State.Players[i];
-            if (ai.IsAi && !ai.Bankrupt)
-            {
-                Ai.ManageAssets(State, ai);
-            }
+            Ai.ManageAssets(State, ai);
         }
 
         if (!extraTurn)
@@ -450,53 +410,21 @@ public sealed class GameManager
 
     private void CheckWinCondition()
     {
-        PlayerState? winner = null;
-        var activeCount = 0;
-        for (var i = 0; i < State.Players.Count; i++)
+        var active = State.Players.Where(p => !p.Bankrupt).ToList();
+        if (active.Count == 1)
         {
-            if (State.Players[i].Bankrupt)
-            {
-                continue;
-            }
-
-            winner = State.Players[i];
-            activeCount++;
-            if (activeCount > 1)
-            {
-                return;
-            }
-        }
-
-        if (activeCount == 1 && winner != null)
-        {
-            State.WinnerId = winner.Id;
+            State.WinnerId = active[0].Id;
             State.Phase = TurnPhase.GameOver;
-            Log($"{winner.Name} wins the game!", winner.Id);
+            Log($"{active[0].Name} wins the game!", active[0].Id);
         }
     }
 
     private void EnsurePhase(params TurnPhase[] phases)
     {
-        for (var i = 0; i < phases.Length; i++)
+        if (!phases.Contains(State.Phase))
         {
-            if (phases[i] == State.Phase)
-            {
-                return;
-            }
+            throw new InvalidOperationException($"Expected phase {string.Join(" or ", phases)}, got {State.Phase}.");
         }
-
-        throw new InvalidOperationException($"Expected phase {string.Join(" or ", phases)}, got {State.Phase}.");
-    }
-
-    private string BuildTurnOrderSummary()
-    {
-        var names = new string[State.Players.Count];
-        for (var i = 0; i < State.Players.Count; i++)
-        {
-            names[i] = State.Players[i].Name;
-        }
-
-        return string.Join(", ", names);
     }
 
     private void Log(string message, Guid? playerId = null)

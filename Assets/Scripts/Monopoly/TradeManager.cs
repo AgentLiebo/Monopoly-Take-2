@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 
 namespace MonopolyTake2;
 
@@ -43,8 +44,8 @@ public sealed class TradeManager
         ValidateOfferOwnership(state, proposal.FromPlayerId, proposal.OfferedByFromPlayer);
         ValidateOfferOwnership(state, proposal.ToPlayerId, proposal.OfferedByToPlayer);
 
-        var from = state.GetPlayer(proposal.FromPlayerId);
-        var to = state.GetPlayer(proposal.ToPlayerId);
+        var from = state.Players.Single(p => p.Id == proposal.FromPlayerId);
+        var to = state.Players.Single(p => p.Id == proposal.ToPlayerId);
         TransferOffer(state, from, to, proposal.OfferedByFromPlayer);
         TransferOffer(state, to, from, proposal.OfferedByToPlayer);
         proposal.Accepted = true;
@@ -66,7 +67,7 @@ public sealed class TradeManager
 
     private static void ValidateOfferOwnership(MonopolyGameState state, Guid ownerId, TradeOffer offer)
     {
-        var player = state.GetPlayer(ownerId);
+        var player = state.Players.Single(p => p.Id == ownerId);
         if (player.Money < offer.Money)
         {
             throw new InvalidOperationException("Player cannot offer more money than they have.");
