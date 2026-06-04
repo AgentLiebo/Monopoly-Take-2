@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MonopolyTake2;
 
@@ -14,23 +15,15 @@ public sealed class PlayerManager
 
     public List<PlayerState> CreatePlayers(IEnumerable<(string Name, TokenType Token, bool IsAi)> players)
     {
-        var list = new List<PlayerState>(MonopolyRules.MaxPlayers);
-        var tokens = new HashSet<TokenType>();
-        foreach (var player in players)
-        {
-            if (!tokens.Add(player.Token))
-            {
-                throw new InvalidOperationException("Each player must choose a unique token.");
-            }
-
-            list.Add(new PlayerState { Name = player.Name, Token = player.Token, IsAi = player.IsAi });
-        }
-
+        var list = players.Select(p => new PlayerState { Name = p.Name, Token = p.Token, IsAi = p.IsAi }).ToList();
         if (list.Count is < MonopolyRules.MinPlayers or > MonopolyRules.MaxPlayers)
         {
             throw new ArgumentOutOfRangeException(nameof(players), "Monopoly supports 2–8 players.");
         }
-
+        if (list.Select(p => p.Token).Distinct().Count() != list.Count)
+        {
+            throw new InvalidOperationException("Each player must choose a unique token.");
+        }
         return list;
     }
 
@@ -105,36 +98,27 @@ public sealed class PlayerManager
 
     public void LiquidateAssets(MonopolyGameState state, PlayerState player)
     {
-        var improved = new List<int>(player.OwnedPropertyIndexes.Count);
-        for (var i = 0; i < player.OwnedPropertyIndexes.Count; i++)
+        var improved = player.OwnedPropertyIndexes
+            .Where(i => state.Properties[i].IsImproved)
+            .OrderByDescending(i => state.Properties[i].HasHotel ? MonopolyRules.HotelHouseEquivalent : state.Properties[i].Houses)
+            .ToList();
+        foreach (var index in improved)
         {
-            var propertyIndex = player.OwnedPropertyIndexes[i];
-            if (state.Properties[propertyIndex].IsImproved)
-            {
-                improved.Add(propertyIndex);
-            }
+            while (player.Money < 0 && _properties.SellImprovement(state, player.Id, index)) { }
         }
 
-        improved.Sort((left, right) => ImprovementRank(state.Properties[right]).CompareTo(ImprovementRank(state.Properties[left])));
-        for (var i = 0; i < improved.Count && player.Money < 0; i++)
+        foreach (var index in player.OwnedPropertyIndexes.ToList())
         {
-            while (player.Money < 0 && _properties.SellImprovement(state, player.Id, improved[i])) { }
-        }
-
-        var ownedSnapshot = new List<int>(player.OwnedPropertyIndexes);
-        for (var i = 0; i < ownedSnapshot.Count && player.Money < 0; i++)
-        {
-            _properties.Mortgage(state, player.Id, ownedSnapshot[i]);
+            if (player.Money >= 0) break;
+            _properties.Mortgage(state, player.Id, index);
         }
     }
 
     public void DeclareBankruptcy(MonopolyGameState state, PlayerState debtor, PlayerState? creditor)
     {
         debtor.Bankrupt = true;
-        var propertiesToTransfer = new List<int>(debtor.OwnedPropertyIndexes);
-        for (var i = 0; i < propertiesToTransfer.Count; i++)
+        foreach (var propertyIndex in debtor.OwnedPropertyIndexes.ToList())
         {
-            var propertyIndex = propertiesToTransfer[i];
             var property = state.Properties[propertyIndex];
             property.Houses = 0;
             property.HasHotel = false;
@@ -149,10 +133,5 @@ public sealed class PlayerManager
 
         debtor.OwnedPropertyIndexes.Clear();
         debtor.GetOutOfJailFreeCards = 0;
-    }
-
-    private static int ImprovementRank(PropertyState property)
-    {
-        return property.HasHotel ? MonopolyRules.HotelHouseEquivalent : property.Houses;
     }
 }

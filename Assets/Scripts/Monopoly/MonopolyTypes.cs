@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MonopolyTake2;
 
@@ -217,33 +218,10 @@ public static class MonopolyRules
     public static int MortgageRepayment(int mortgageValue) => mortgageValue + (int)Math.Ceiling(mortgageValue * 0.10m);
 }
 
-public static class GameStateLookupExtensions
-{
-    public static PlayerState GetPlayer(this MonopolyGameState state, Guid playerId)
-    {
-        for (var i = 0; i < state.Players.Count; i++)
-        {
-            if (state.Players[i].Id == playerId)
-            {
-                return state.Players[i];
-            }
-        }
-
-        throw new InvalidOperationException($"Player {playerId} does not exist in this game state.");
-    }
-}
-
 public static class EnumerableExtensions
 {
-    public static IReadOnlyList<T> Shuffle<T>(this IEnumerable<T> source, Random rng)
+    public static IEnumerable<T> Shuffle<T>(this IEnumerable<T> source, Random rng)
     {
-        var items = source is IList<T> list ? new List<T>(list) : new List<T>(source);
-        for (var i = items.Count - 1; i > 0; i--)
-        {
-            var swapIndex = rng.Next(i + 1);
-            (items[i], items[swapIndex]) = (items[swapIndex], items[i]);
-        }
-
-        return items;
+        return source.OrderBy(_ => rng.Next());
     }
 }

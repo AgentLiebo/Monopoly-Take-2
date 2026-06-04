@@ -22,8 +22,3 @@ MemoryCaptures/
 *.pidb
 *.booproj
 *.svd
-
-# Publish artifacts
-publish/
-Assets/Scenes/GeneratedMonopoly.unity
-Assets/Scenes/GeneratedMonopoly.unity.meta
