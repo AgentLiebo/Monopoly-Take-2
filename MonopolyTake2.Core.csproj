@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <StartupObject>MonopolyTake2.Program</StartupObject>
+    <TargetFramework>net8.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
+    <UseAppHost>true</UseAppHost>
+    <IsPublishable>true</IsPublishable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(RuntimeIdentifier)' != ''">
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <PublishDir>$(MSBuildProjectDirectory)/publish/$(RuntimeIdentifier)/</PublishDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Assets/Scripts/Monopoly/**/*.cs" />
+  </ItemGroup>
+</Project>
